@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check ownership
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    // User documents - only owner can read/write
+    match /users/{uid} {
+      allow read, write: if isAuthenticated() && isOwner(uid);
+
+      // Channels subcollection
+      match /channels/{channelId} {
+        allow read, write: if isAuthenticated() && isOwner(uid);
+
+        // Messages subcollection
+        match /messages/{messageId} {
+          allow read, write: if isAuthenticated() && isOwner(uid);
+        }
+      }
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
