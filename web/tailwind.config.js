@@ -8,8 +8,8 @@ export default {
     extend: {
       colors: {
         discord: {
-          dark: '#1e1f22',
-          darker: '#111214',
+          dark: '#171717',
+          darker: '#121212',
           gray: '#313338',
           lightgray: '#3f4147',
           text: '#dbdee1',

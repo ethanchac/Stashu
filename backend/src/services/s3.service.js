@@ -14,12 +14,12 @@ export const generatePresignedUploadUrl = async (s3Key, contentType, expiresIn =
     Bucket: S3_BUCKET,
     Key: s3Key,
     ContentType: contentType,
-    Metadata: {
-      uploadedAt: new Date().toISOString()
-    }
+    ChecksumAlgorithm: undefined
   });
 
-  const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+  const presignedUrl = await getSignedUrl(s3Client, command, {
+    expiresIn
+  });
   return presignedUrl;
 };
 

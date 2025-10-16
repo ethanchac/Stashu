@@ -6,7 +6,6 @@
   "workspaces": [
     "backend",
     "web",
-    "mobile",
     "shared"
   ],
   "scripts": {
@@ -15,7 +14,21 @@
     "dev:mobile": "npm run dev --workspace=mobile",
     "install:all": "npm install && npm install --workspaces"
   },
-  "keywords": ["personal", "storage", "organization", "chat"],
+  "keywords": [
+    "personal",
+    "storage",
+    "organization",
+    "chat"
+  ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "metro": "^0.81.0",
+    "metro-cache": "^0.83.3",
+    "metro-config": "^0.83.3",
+    "metro-core": "^0.83.3",
+    "metro-resolver": "^0.83.3",
+    "metro-runtime": "^0.81.0",
+    "metro-transform-worker": "^0.83.3"
+  }
 }

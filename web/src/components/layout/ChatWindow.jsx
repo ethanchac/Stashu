@@ -23,6 +23,7 @@ export default function ChatWindow({ channelId }) {
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const searchInputRef = useRef(null);
   const searchScopeRef = useRef(null);
+  const [searchExpanded, setSearchExpanded] = useState(false);
 
   // Debounce search query (500ms delay)
   useEffect(() => {
@@ -65,12 +66,16 @@ export default function ChatWindow({ channelId }) {
     const handleClickOutside = (event) => {
       if (searchScopeRef.current && !searchScopeRef.current.contains(event.target)) {
         setShowSearchScope(false);
+        // Collapse search if empty and clicking outside
+        if (!searchQuery && searchExpanded) {
+          setSearchExpanded(false);
+        }
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [searchQuery, searchExpanded]);
 
   // Track if user is scrolling up
   useEffect(() => {
@@ -173,99 +178,128 @@ export default function ChatWindow({ channelId }) {
   return (
     <div className="flex flex-col h-full relative">
       {/* Top Bar with Search and Pin Icon */}
-      <div className="bg-discord-darker border-b border-discord-gray px-4 py-2 flex items-center gap-3">
+      <div className="bg-discord-dark border-b border-discord-gray px-4 py-2 flex items-center justify-between gap-3">
         {/* Search Bar */}
-        <div className="flex-1 relative" ref={searchScopeRef}>
+        <div className={`relative transition-all duration-300 ease-in-out ${searchExpanded ? 'flex-1' : 'w-10'}`} ref={searchScopeRef}>
           <div className="relative">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => {
-                if (!searchQuery) {
-                  setShowSearchScope(true);
-                }
-              }}
-              onKeyDown={(e) => {
-                // Remove tags when backspace is pressed and input is empty
-                if (e.key === 'Backspace' && !searchQuery) {
-                  // Remove :pinned first, then :all
-                  if (showPinnedOnly) {
-                    setShowPinnedOnly(false);
-                  } else if (searchScope === 'all') {
-                    setSearchScope('current');
-                  }
-                }
-              }}
-              placeholder="Search messages..."
-              className={`w-full bg-discord-dark border border-discord-gray rounded-lg py-2 text-discord-text placeholder-discord-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent ${
-                searchScope === 'all' && showPinnedOnly ? 'pl-32 pr-10' :
-                searchScope === 'all' || showPinnedOnly ? 'pl-16 pr-10' :
-                'pl-10 pr-10'
-              }`}
-            />
-
-            {/* Search scope tags */}
-            {(searchScope === 'all' || showPinnedOnly) && (
-              <div className="absolute left-3 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
-                {searchScope === 'all' && (
-                  <button
-                    onClick={() => setSearchScope('current')}
-                    className="hover:opacity-80 transition-opacity"
-                    title="Click to remove :all filter"
-                  >
-                    <span className="bg-discord-accent text-white text-xs px-2 py-0.5 rounded font-medium cursor-pointer">
-                      :all
-                    </span>
-                  </button>
-                )}
-                {showPinnedOnly && (
-                  <button
-                    onClick={() => setShowPinnedOnly(false)}
-                    className="hover:opacity-80 transition-opacity"
-                    title="Click to remove :pinned filter"
-                  >
-                    <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded font-medium cursor-pointer">
-                      :pinned
-                    </span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Search icon */}
-            {searchScope !== 'all' && !showPinnedOnly && (
-              <svg
-                className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-discord-muted"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            )}
-
-            {/* Clear button */}
-            {searchQuery && (
+            {/* Magnifying glass icon button - visible when collapsed */}
+            {!searchExpanded && (
               <button
                 onClick={() => {
-                  setSearchQuery('');
-                  setSearchScope('current');
-                  setShowPinnedOnly(false);
+                  setSearchExpanded(true);
+                  setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-discord-muted hover:text-discord-text transition-colors"
+                className="p-2 rounded-lg text-discord-muted hover:text-discord-text hover:bg-discord-gray transition-colors"
+                title="Search messages"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
               </button>
+            )}
+
+            {/* Search input - visible when expanded */}
+            {searchExpanded && (
+              <>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => {
+                    if (!searchQuery) {
+                      setShowSearchScope(true);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Remove tags when backspace is pressed and input is empty
+                    if (e.key === 'Backspace' && !searchQuery) {
+                      // Remove :pinned first, then :all
+                      if (showPinnedOnly) {
+                        setShowPinnedOnly(false);
+                      } else if (searchScope === 'all') {
+                        setSearchScope('current');
+                      }
+                    }
+                  }}
+                  placeholder="Search messages..."
+                  className={`w-full bg-discord-darker border border-discord-gray rounded-lg py-2 text-discord-text placeholder-discord-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition-all ${
+                    searchScope === 'all' && showPinnedOnly ? 'pl-32 pr-10' :
+                    searchScope === 'all' || showPinnedOnly ? 'pl-16 pr-10' :
+                    'pl-10 pr-10'
+                  }`}
+                />
+
+                {/* Search scope tags */}
+                {(searchScope === 'all' || showPinnedOnly) && (
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
+                    {searchScope === 'all' && (
+                      <button
+                        onClick={() => setSearchScope('current')}
+                        className="hover:opacity-80 transition-opacity"
+                        title="Click to remove :all filter"
+                      >
+                        <span className="bg-discord-accent text-white text-xs px-2 py-0.5 rounded font-medium cursor-pointer">
+                          :all
+                        </span>
+                      </button>
+                    )}
+                    {showPinnedOnly && (
+                      <button
+                        onClick={() => setShowPinnedOnly(false)}
+                        className="hover:opacity-80 transition-opacity"
+                        title="Click to remove :pinned filter"
+                      >
+                        <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded font-medium cursor-pointer">
+                          :pinned
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Search icon */}
+                {searchScope !== 'all' && !showPinnedOnly && (
+                  <svg
+                    className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-discord-muted"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                )}
+
+                {/* Close/Clear button */}
+                <button
+                  onClick={() => {
+                    if (searchQuery) {
+                      setSearchQuery('');
+                      setSearchScope('current');
+                      setShowPinnedOnly(false);
+                    } else {
+                      setSearchExpanded(false);
+                    }
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-discord-muted hover:text-discord-text transition-colors"
+                  title={searchQuery ? "Clear search" : "Close search"}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </>
             )}
           </div>
 
           {/* Search Scope Dropdown */}
-          {showSearchScope && !searchQuery && (
-            <div className="absolute top-full mt-1 left-0 right-0 bg-discord-darker border border-discord-gray rounded-lg shadow-xl z-50 overflow-hidden">
+          {showSearchScope && !searchQuery && searchExpanded && (
+            <div className="absolute top-full mt-1 left-0 right-0 bg-discord-dark border border-discord-gray rounded-lg shadow-xl z-50 overflow-hidden">
               {searchScope !== 'all' && (
                 <button
                   onClick={() => {
@@ -326,7 +360,7 @@ export default function ChatWindow({ channelId }) {
             className="fixed inset-0 bg-black/50 z-30"
             onClick={() => setShowPinnedPanel(false)}
           />
-          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-discord-darker border border-discord-gray rounded-lg shadow-2xl z-40 w-full max-w-2xl max-h-[80vh] overflow-hidden">
+          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-discord-dark border border-discord-gray rounded-lg shadow-2xl z-40 w-full max-w-2xl max-h-[80vh] overflow-hidden">
             <div className="p-4 border-b border-discord-gray flex items-center justify-between">
               <h3 className="text-discord-text font-semibold flex items-center gap-2">
                 <svg className="w-5 h-5 text-discord-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">

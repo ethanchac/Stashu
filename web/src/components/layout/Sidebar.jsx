@@ -56,6 +56,15 @@ export default function Sidebar({ channels, activeChannelId, onSelectChannel }) 
           <span className="text-xs font-semibold text-discord-muted uppercase">
             Channels
           </span>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="p-1 rounded hover:bg-discord-gray text-discord-muted hover:text-discord-text transition-colors"
+            title="Create new channel"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
         </div>
 
         {channels.map((channel) => (

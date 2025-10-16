@@ -6,7 +6,9 @@ export const s3Client = new S3Client({
   credentials: {
     accessKeyId: config.aws.accessKeyId,
     secretAccessKey: config.aws.secretAccessKey
-  }
+  },
+  // Disable checksums to avoid CORS issues
+  requestChecksumCalculation: 'WHEN_REQUIRED'
 });
 
 export const S3_BUCKET = config.aws.s3Bucket;
