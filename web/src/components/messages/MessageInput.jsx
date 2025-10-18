@@ -12,6 +12,13 @@ export default function MessageInput({ channelId }) {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
+
+    // If there's a pasted image, send it instead
+    if (pastedImage) {
+      await handleSendPastedImage();
+      return;
+    }
+
     if (!message.trim() || sending) return;
 
     try {
@@ -35,16 +42,17 @@ export default function MessageInput({ channelId }) {
 
     try {
       // Upload file to S3
-      const { s3Key, fileMetadata } = await uploadFile(file);
+      const { s3Key, fileMetadata, downloadUrl } = await uploadFile(file);
 
       // Determine message type based on file MIME type
       const messageType = file.type.startsWith('image/') ? 'image' : 'file';
 
-      // Send message with file reference
+      // Send message with file reference and download URL
       await api.post(`/channels/${channelId}/messages`, {
         content: file.name,
         type: messageType,
         fileRef: s3Key,
+        fileUrl: downloadUrl, // Add download URL for display
         fileMetadata
       });
 
@@ -89,13 +97,14 @@ export default function MessageInput({ channelId }) {
       );
 
       // Upload file to S3
-      const { s3Key, fileMetadata } = await uploadFile(file);
+      const { s3Key, fileMetadata, downloadUrl } = await uploadFile(file);
 
-      // Send message with file reference
+      // Send message with file reference and download URL
       await api.post(`/channels/${channelId}/messages`, {
         content: message.trim() || 'Pasted image',
         type: 'image',
         fileRef: s3Key,
+        fileUrl: downloadUrl, // Add download URL for display
         fileMetadata
       });
 
@@ -133,39 +142,7 @@ export default function MessageInput({ channelId }) {
         </div>
       )}
 
-      {/* Pasted Image Preview */}
-      {pastedImage && (
-        <div className="mb-3 p-3 bg-discord-dark rounded-lg border border-discord-gray">
-          <div className="flex items-start gap-3">
-            <img
-              src={pastedImage.url}
-              alt="Pasted"
-              className="w-32 h-32 object-cover rounded border border-discord-gray"
-            />
-            <div className="flex-1">
-              <p className="text-discord-text text-sm mb-2">Pasted image ready to send</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSendPastedImage}
-                  disabled={uploading}
-                  className="px-3 py-1.5 bg-discord-accent hover:bg-indigo-600 text-white text-sm rounded transition-colors disabled:opacity-50"
-                >
-                  Send Image
-                </button>
-                <button
-                  onClick={handleCancelPastedImage}
-                  disabled={uploading}
-                  className="px-3 py-1.5 bg-discord-gray hover:bg-discord-lightgray text-discord-text text-sm rounded transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <form onSubmit={handleSendMessage} className="flex gap-2">
+      <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
         <input
           type="file"
           ref={fileInputRef}
@@ -196,21 +173,45 @@ export default function MessageInput({ channelId }) {
           </svg>
         </button>
 
-        <input
-          ref={textInputRef}
-          type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onPaste={handlePaste}
-          placeholder="Type a message..."
-          className="input-field flex-1"
-          disabled={uploading || sending}
-        />
+        <div className="flex-1 flex flex-col gap-2">
+          {/* Pasted Image Preview - inline with input */}
+          {pastedImage && (
+            <div className="relative w-16 h-16 group">
+              <img
+                src={pastedImage.url}
+                alt="Pasted"
+                className="w-16 h-16 object-cover rounded border border-discord-gray"
+              />
+              <button
+                type="button"
+                onClick={handleCancelPastedImage}
+                disabled={uploading}
+                className="absolute -top-2 -right-2 p-1 bg-red-500 hover:bg-red-600 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Remove image"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          <input
+            ref={textInputRef}
+            type="text"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onPaste={handlePaste}
+            placeholder="Type a message.."
+            className="input-field w-full"
+            disabled={uploading || sending}
+          />
+        </div>
 
         <button
           type="submit"
-          disabled={!message.trim() || uploading || sending}
-          className="px-6 bg-discord-accent hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+          disabled={(!message.trim() && !pastedImage) || uploading || sending}
+          className="px-6 py-3 bg-discord-accent hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
         >
           {sending ? 'Sending...' : 'Send'}
         </button>

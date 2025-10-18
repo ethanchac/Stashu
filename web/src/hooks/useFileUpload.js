@@ -13,19 +13,13 @@ export const useFileUpload = () => {
       setProgress(0);
       setError(null);
 
-      // Step 1: Get presigned URL from backend
-      const { data } = await api.post('/upload-url', {
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size
-      });
+      // Upload file through backend (bypasses CORS issues)
+      const formData = new FormData();
+      formData.append('file', file);
 
-      const { uploadUrl, s3Key } = data;
-
-      // Step 2: Upload file directly to S3
-      await axios.put(uploadUrl, file, {
+      const { data } = await api.post('/upload', formData, {
         headers: {
-          'Content-Type': file.type
+          'Content-Type': 'multipart/form-data'
         },
         onUploadProgress: (progressEvent) => {
           const percent = Math.round(
@@ -37,15 +31,8 @@ export const useFileUpload = () => {
 
       setUploading(false);
 
-      // Return s3Key to be included in message
-      return {
-        s3Key,
-        fileMetadata: {
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type
-        }
-      };
+      // Return s3Key and metadata from backend response
+      return data;
     } catch (err) {
       console.error('Upload error:', err);
       setError(err.response?.data?.error || err.message);

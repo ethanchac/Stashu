@@ -14,7 +14,7 @@ export const useFileUpload = () => {
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
         allowsMultipleSelection: false,
@@ -59,29 +59,21 @@ export const useFileUpload = () => {
       const fileInfo = await FileSystem.getInfoAsync(fileUri);
       const fileSize = fileInfo.size;
 
-      // Step 1: Get presigned URL from backend
-      const { data } = await api.post('/upload-url', {
-        fileName,
-        fileType: mimeType,
-        fileSize,
+      console.log('File info:', { fileUri, fileName, mimeType, fileSize });
+
+      // Upload file through backend (bypasses CORS issues)
+      const formData = new FormData();
+      formData.append('file', {
+        uri: fileUri,
+        name: fileName,
+        type: mimeType,
       });
 
-      const { uploadUrl, s3Key } = data;
+      console.log('Sending upload request to /upload');
 
-      // Step 2: Read file as base64
-      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // Convert base64 to blob
-      const blob = await fetch(`data:${mimeType};base64,${fileContent}`).then(
-        (res) => res.blob()
-      );
-
-      // Step 3: Upload file directly to S3
-      await axios.put(uploadUrl, blob, {
+      const { data } = await api.post('/upload', formData, {
         headers: {
-          'Content-Type': mimeType,
+          'Content-Type': 'multipart/form-data',
         },
         onUploadProgress: (progressEvent) => {
           const percent = Math.round(
@@ -91,19 +83,15 @@ export const useFileUpload = () => {
         },
       });
 
+      console.log('Upload response:', data);
       setUploading(false);
 
-      // Return s3Key to be included in message
-      return {
-        s3Key,
-        fileMetadata: {
-          fileName,
-          fileSize,
-          mimeType,
-        },
-      };
+      // Return s3Key, metadata, and downloadUrl from backend response
+      return data;
     } catch (err) {
       console.error('Upload error:', err);
+      console.error('Upload error response:', err.response?.data);
+      console.error('Upload error status:', err.response?.status);
       setError(err.response?.data?.error || err.message);
       setUploading(false);
       throw err;

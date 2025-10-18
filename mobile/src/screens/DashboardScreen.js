@@ -13,14 +13,21 @@ import {
   Alert,
   Dimensions,
   Animated,
-  PanResponder
+  PanResponder,
+  ActionSheetIOS,
+  Image,
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import * as MediaLibrary from 'expo-media-library';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { useChannels } from '../hooks/useChannels';
 import { useMessages } from '../hooks/useMessages';
 import { useGlobalSearch } from '../hooks/useGlobalSearch';
+import { useFileUpload } from '../hooks/useFileUpload';
 import MessageItem from '../components/MessageItem';
 import api from '../services/api';
 
@@ -46,8 +53,13 @@ export default function DashboardScreen() {
   const [activeChannelId, setActiveChannelId] = useState(null);
   const { messages, loading: messagesLoading, loadMore, hasMore } = useMessages(activeChannelId);
   const { searchAllChannels, searching, searchResults } = useGlobalSearch();
+  const { uploadFile, uploading, progress } = useFileUpload();
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [showUploadSheet, setShowUploadSheet] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [showChannelModal, setShowChannelModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelIcon, setNewChannelIcon] = useState('💬');
@@ -158,6 +170,12 @@ export default function DashboardScreen() {
   }, [channels, activeChannelId]);
 
   const handleSendMessage = async () => {
+    // If there are selected files, send them
+    if (selectedFiles.length > 0) {
+      await handleSendFiles();
+      return;
+    }
+
     if (!newMessage.trim() || !activeChannelId) return;
 
     const content = newMessage.trim();
@@ -180,6 +198,187 @@ export default function DashboardScreen() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleSendFiles = async () => {
+    if (selectedFiles.length === 0) return;
+
+    try {
+      setSending(true);
+
+      // Upload all files
+      for (const file of selectedFiles) {
+        console.log('Uploading file:', {
+          uri: file.uri,
+          name: file.name,
+          mimeType: file.mimeType,
+          type: file.type
+        });
+
+        const { s3Key, fileMetadata, downloadUrl } = await uploadFile(
+          file.uri,
+          file.name,
+          file.mimeType
+        );
+
+        console.log('File uploaded successfully:', { s3Key, downloadUrl });
+
+        // Send message with file reference and download URL
+        await api.post(`/channels/${activeChannelId}/messages`, {
+          content: newMessage.trim() || file.name,
+          type: file.type,
+          fileRef: s3Key,
+          fileUrl: downloadUrl,
+          fileMetadata
+        });
+      }
+
+      // Clear selection and message
+      setSelectedFiles([]);
+      setNewMessage('');
+      handleCloseUploadSheet();
+    } catch (error) {
+      console.error('Failed to upload files:', error);
+      console.error('Error details:', error.response?.data);
+      Alert.alert('Error', `Failed to upload files: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const loadPhotos = async () => {
+    try {
+      setLoadingPhotos(true);
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need access to your photos to upload them.');
+        return;
+      }
+
+      const result = await MediaLibrary.getAssetsAsync({
+        first: 50,
+        mediaType: 'photo',
+        sortBy: ['creationTime'],
+      });
+
+      // Get full asset info for each photo to get localUri
+      const photosWithLocalUri = await Promise.all(
+        result.assets.map(async (asset) => {
+          try {
+            const assetInfo = await MediaLibrary.getAssetInfoAsync(asset.id);
+            return {
+              ...asset,
+              localUri: assetInfo.localUri || assetInfo.uri
+            };
+          } catch (error) {
+            console.error('Failed to get asset info:', error);
+            return asset;
+          }
+        })
+      );
+
+      setPhotos(photosWithLocalUri);
+
+      if (photosWithLocalUri.length === 0) {
+        Alert.alert('No Photos', 'No photos found in your library. Try adding some photos to the simulator.');
+      }
+    } catch (error) {
+      console.error('Failed to load photos:', error);
+      Alert.alert('Error', `Failed to load photos: ${error.message}`);
+    } finally {
+      setLoadingPhotos(false);
+    }
+  };
+
+  const handleOpenUploadSheet = async () => {
+    setShowUploadSheet(true);
+    await loadPhotos();
+  };
+
+  const handleCloseUploadSheet = () => {
+    setShowUploadSheet(false);
+    setSelectedFiles([]);
+  };
+
+  const handleSelectPhoto = async (photo) => {
+    try {
+      const fileData = {
+        uri: photo.localUri || photo.uri,
+        assetId: photo.id,
+        name: photo.filename || `image-${Date.now()}.jpg`,
+        mimeType: 'image/jpeg',
+        type: 'image'
+      };
+
+      // Check if already selected
+      const isSelected = selectedFiles.some(f => f.assetId === photo.id);
+
+      if (isSelected) {
+        // Remove from selection
+        setSelectedFiles(selectedFiles.filter(f => f.assetId !== photo.id));
+      } else {
+        // Add to selection
+        setSelectedFiles([...selectedFiles, fileData]);
+      }
+    } catch (error) {
+      console.error('Failed to select photo:', error);
+      Alert.alert('Error', 'Failed to select photo');
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need camera access to take photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setSelectedFiles([...selectedFiles, {
+          uri: result.assets[0].uri,
+          name: `photo-${Date.now()}.jpg`,
+          mimeType: 'image/jpeg',
+          type: 'image'
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to take photo:', error);
+      Alert.alert('Error', 'Failed to take photo');
+    }
+  };
+
+  const handlePickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.type === 'success') {
+        setSelectedFiles([...selectedFiles, {
+          uri: result.uri,
+          name: result.name,
+          mimeType: result.mimeType || 'application/octet-stream',
+          type: 'file'
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to pick document:', error);
+      Alert.alert('Error', 'Failed to pick document');
+    }
+  };
+
+  const handleRemoveFile = (index) => {
+    setSelectedFiles(selectedFiles.filter((_, i) => i !== index));
   };
 
   const handleCreateChannel = async () => {
@@ -405,27 +604,54 @@ export default function DashboardScreen() {
                   behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                   keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
                 >
+                  {/* Upload Progress */}
+                  {uploading && (
+                    <View style={styles.uploadProgressContainer}>
+                      <View style={styles.uploadProgressInfo}>
+                        <Text style={styles.uploadProgressText}>Uploading...</Text>
+                        <Text style={styles.uploadProgressPercent}>{progress}%</Text>
+                      </View>
+                      <View style={styles.uploadProgressBar}>
+                        <View
+                          style={[
+                            styles.uploadProgressFill,
+                            { width: `${progress}%` }
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  )}
+
                   <View style={styles.inputContainer}>
-                    <TextInput
-                      style={styles.messageInput}
-                      placeholder="Type a message..."
-                      placeholderTextColor="#72767d"
-                      value={newMessage}
-                      onChangeText={setNewMessage}
-                      multiline
-                      maxLength={2000}
-                      editable={!sending}
-                    />
-                    <TouchableOpacity
-                      style={[styles.sendButton, sending && styles.sendButtonDisabled]}
-                      onPress={handleSendMessage}
-                      disabled={sending || !newMessage.trim()}
-                    >
-                      <Text style={styles.sendButtonText}>
-                        {sending ? '...' : '→'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                      {/* Attachment Button */}
+                      <TouchableOpacity
+                        style={[styles.attachButton, (uploading || sending) && styles.attachButtonDisabled]}
+                        onPress={handleOpenUploadSheet}
+                        disabled={uploading || sending}
+                      >
+                        <Text style={styles.attachButtonText}>+</Text>
+                      </TouchableOpacity>
+
+                      <TextInput
+                        style={styles.messageInput}
+                        placeholder="Type a message..."
+                        placeholderTextColor="#72767d"
+                        value={newMessage}
+                        onChangeText={setNewMessage}
+                        multiline
+                        maxLength={2000}
+                        editable={!sending && !uploading}
+                      />
+                      <TouchableOpacity
+                        style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                        onPress={handleSendMessage}
+                        disabled={sending || !newMessage.trim()}
+                      >
+                        <Text style={styles.sendButtonText}>
+                          {sending ? '...' : '→'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                 </KeyboardAvoidingView>
               )}
             </View>
@@ -505,6 +731,141 @@ export default function DashboardScreen() {
           />
         )}
       </Animated.View>
+
+      {/* Upload Bottom Sheet Modal - Discord Style */}
+      <Modal
+        visible={showUploadSheet}
+        animationType="slide"
+        transparent
+        onRequestClose={handleCloseUploadSheet}
+      >
+        <TouchableOpacity
+          style={styles.uploadSheetOverlay}
+          activeOpacity={1}
+          onPress={handleCloseUploadSheet}
+        >
+          <View style={styles.uploadSheet}>
+            {/* Message Input at Top */}
+            <View style={styles.uploadInputContainer}>
+              {/* File Previews */}
+              {selectedFiles.length > 0 && (
+                <ScrollView
+                  horizontal
+                  style={styles.uploadFilePreviews}
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {selectedFiles.map((file, index) => (
+                    <View key={index} style={styles.uploadFilePreviewThumb}>
+                      {file.type === 'image' ? (
+                        <Image
+                          source={{ uri: file.uri }}
+                          style={styles.uploadPreviewThumbImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.uploadPreviewThumbFile}>
+                          <Text style={styles.uploadPreviewThumbFileIcon}>📄</Text>
+                        </View>
+                      )}
+                      <TouchableOpacity
+                        style={styles.uploadPreviewThumbCancel}
+                        onPress={() => handleRemoveFile(index)}
+                        disabled={uploading}
+                      >
+                        <Text style={styles.uploadPreviewCancelText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+
+              <TextInput
+                style={styles.uploadMessageInput}
+                placeholder={selectedFiles.length > 0 ? 'Add a caption...' : 'Type a message...'}
+                placeholderTextColor="#72767d"
+                value={newMessage}
+                onChangeText={setNewMessage}
+                multiline
+                maxLength={2000}
+                editable={!sending && !uploading}
+              />
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.uploadActions}>
+              <TouchableOpacity
+                style={styles.uploadActionButton}
+                onPress={handleTakePhoto}
+              >
+                <Text style={styles.uploadActionIcon}>📷</Text>
+                <Text style={styles.uploadActionText}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.uploadActionButton}
+                onPress={handlePickDocument}
+              >
+                <Text style={styles.uploadActionIcon}>📁</Text>
+                <Text style={styles.uploadActionText}>Files</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Photo Grid - 3 Columns */}
+            {loadingPhotos ? (
+              <View style={styles.uploadLoadingContainer}>
+                <ActivityIndicator color="#5865f2" size="large" />
+              </View>
+            ) : photos.length === 0 ? (
+              <View style={styles.uploadLoadingContainer}>
+                <Text style={styles.emptyText}>No photos in library</Text>
+                <Text style={styles.emptySubtext}>Use "Take Photo" or "Files" above</Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.photoGrid}>
+                <View style={styles.photoGridRow}>
+                  {photos.map((photo, index) => {
+                    return (
+                      <TouchableOpacity
+                        key={photo.id}
+                        style={[
+                          styles.photoGridItem,
+                          selectedFiles.some(f => f.assetId === photo.id) && styles.photoGridItemSelected
+                        ]}
+                        onPress={() => handleSelectPhoto(photo)}
+                      >
+                        <Image
+                          source={{ uri: photo.localUri || photo.uri }}
+                          style={styles.photoGridImage}
+                          resizeMode="cover"
+                        />
+                        {selectedFiles.some(f => f.assetId === photo.id) && (
+                          <View style={styles.photoSelectedOverlay}>
+                            <Text style={styles.photoSelectedCheck}>✓</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
+
+            {/* Send Button */}
+            {selectedFiles.length > 0 && (
+              <View style={styles.uploadSendContainer}>
+                <TouchableOpacity
+                  style={styles.uploadSendButton}
+                  onPress={handleSendFiles}
+                  disabled={uploading || sending}
+                >
+                  <Text style={styles.uploadSendButtonText}>
+                    {uploading || sending ? 'Uploading...' : `Send ${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'}`}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Create Channel Modal */}
       <Modal
@@ -959,5 +1320,254 @@ const styles = StyleSheet.create({
   },
   pinnedList: {
     padding: 12,
+  },
+  uploadProgressContainer: {
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#171717',
+    borderTopWidth: 1,
+    borderTopColor: '#313338',
+  },
+  uploadProgressInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  uploadProgressText: {
+    fontSize: 12,
+    color: '#949ba4',
+  },
+  uploadProgressPercent: {
+    fontSize: 12,
+    color: '#949ba4',
+  },
+  uploadProgressBar: {
+    height: 4,
+    backgroundColor: '#121212',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  uploadProgressFill: {
+    height: '100%',
+    backgroundColor: '#5865f2',
+  },
+  filePreviewContainer: {
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#171717',
+    borderTopWidth: 1,
+    borderTopColor: '#313338',
+  },
+  previewCard: {
+    backgroundColor: '#121212',
+    borderRadius: 8,
+    padding: 8,
+    position: 'relative',
+  },
+  previewImage: {
+    width: '100%',
+    height: 120,
+    borderRadius: 8,
+  },
+  previewFile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+  },
+  previewFileIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  previewFileName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#dbdee1',
+  },
+  cancelButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  attachButton: {
+    marginRight: 8,
+    width: 44,
+    height: 44,
+    backgroundColor: '#5865f2',
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachButtonDisabled: {
+    opacity: 0.5,
+  },
+  attachButtonText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  uploadSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  uploadSheet: {
+    backgroundColor: '#171717',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    height: '60%',
+    paddingBottom: 20,
+  },
+  uploadInputContainer: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#313338',
+  },
+  uploadFilePreviews: {
+    marginBottom: 8,
+  },
+  uploadFilePreviewThumb: {
+    width: 70,
+    height: 70,
+    borderRadius: 8,
+    marginRight: 8,
+    position: 'relative',
+    backgroundColor: '#121212',
+  },
+  uploadPreviewThumbImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  uploadPreviewThumbFile: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#313338',
+  },
+  uploadPreviewThumbFileIcon: {
+    fontSize: 32,
+  },
+  uploadPreviewThumbCancel: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ed4245',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadPreviewCancelText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  uploadMessageInput: {
+    backgroundColor: '#121212',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#dbdee1',
+    minHeight: 50,
+    maxHeight: 100,
+  },
+  uploadActions: {
+    flexDirection: 'row',
+    padding: 16,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#313338',
+  },
+  uploadActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#313338',
+    padding: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  uploadActionIcon: {
+    fontSize: 20,
+  },
+  uploadActionText: {
+    color: '#dbdee1',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  uploadLoadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoGrid: {
+    maxHeight: 300,
+    padding: 8,
+  },
+  photoGridRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  photoGridItem: {
+    width: '32.5%',
+    aspectRatio: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoGridItemSelected: {
+    borderWidth: 3,
+    borderColor: '#5865f2',
+  },
+  photoGridImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoSelectedOverlay: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#5865f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoSelectedCheck: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  uploadSendContainer: {
+    padding: 16,
+    paddingTop: 12,
+  },
+  uploadSendButton: {
+    backgroundColor: '#5865f2',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  uploadSendButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

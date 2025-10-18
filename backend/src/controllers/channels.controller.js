@@ -9,6 +9,17 @@ export const createChannel = async (req, res, next) => {
     // Validate input
     const validated = channelSchema.parse({ name, color, icon });
 
+    // Get the current max order value to append new channel at the end
+    const channelsSnapshot = await db
+      .collection('users')
+      .doc(uid)
+      .collection('channels')
+      .orderBy('order', 'desc')
+      .limit(1)
+      .get();
+
+    const maxOrder = channelsSnapshot.empty ? 0 : (channelsSnapshot.docs[0].data().order || 0);
+
     const channelRef = db
       .collection('users')
       .doc(uid)
@@ -21,6 +32,7 @@ export const createChannel = async (req, res, next) => {
       color: validated.color,
       icon: validated.icon,
       messageCount: 0,
+      order: maxOrder + 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -41,7 +53,7 @@ export const getChannels = async (req, res, next) => {
       .collection('users')
       .doc(uid)
       .collection('channels')
-      .orderBy('createdAt', 'desc')
+      .orderBy('order', 'asc')
       .get();
 
     const channels = snapshot.docs.map(doc => doc.data());

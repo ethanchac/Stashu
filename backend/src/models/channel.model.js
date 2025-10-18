@@ -12,7 +12,9 @@ export const channelSchema = z.object({
   icon: z.string()
     .max(4, 'Icon must be a single emoji')
     .optional()
-    .default('💬')
+    .default('💬'),
+  order: z.number()
+    .optional()
 });
 
 export const updateChannelSchema = z.object({
@@ -26,5 +28,7 @@ export const updateChannelSchema = z.object({
     .optional(),
   icon: z.string()
     .max(4, 'Icon must be a single emoji')
+    .optional(),
+  order: z.number()
     .optional()
 });

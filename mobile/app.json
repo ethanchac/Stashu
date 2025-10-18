@@ -13,7 +13,13 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images to chats.",
+        "NSCameraUsageDescription": "This app needs access to your camera to take photos for chats.",
+        "NSPhotoLibraryAddUsageDescription": "This app needs access to save images to your photo library.",
+        "PHPhotoLibraryPreventAutomaticLimitedAccessAlert": true
+      }
     },
     "android": {
       "adaptiveIcon": {

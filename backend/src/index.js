@@ -8,6 +8,7 @@ import { apiLimiter } from './middlewares/rateLimiter.js';
 import channelsRoutes from './routes/channels.routes.js';
 import messagesRoutes from './routes/messages.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
+import proxyRoutes from './routes/proxy.routes.js';
 
 const app = express();
 
@@ -29,7 +30,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// API routes
+// Public proxy route (no auth required) - must come before authenticated routes
+app.use('/api/proxy', proxyRoutes);
+
+// API routes (with auth)
 app.use('/api', channelsRoutes);
 app.use('/api', messagesRoutes);
 app.use('/api', uploadRoutes);

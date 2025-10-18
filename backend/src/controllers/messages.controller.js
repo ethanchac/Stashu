@@ -7,7 +7,7 @@ export const createMessage = async (req, res, next) => {
   try {
     const { channelId } = req.params;
     const uid = req.user.uid;
-    const { content, type, fileRef, fileMetadata, tags } = req.body;
+    const { content, type, fileRef, fileMetadata, fileUrl, tags } = req.body;
 
     // Validate
     const validated = messageSchema.parse({
@@ -31,6 +31,7 @@ export const createMessage = async (req, res, next) => {
       content: validated.content,
       type: validated.type,
       fileRef: validated.fileRef || null,
+      fileUrl: fileUrl || null, // Store the fileUrl
       fileMetadata: validated.fileMetadata || null,
       tags: validated.tags || [],
       isPinned: false,

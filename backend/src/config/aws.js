@@ -8,7 +8,9 @@ export const s3Client = new S3Client({
     secretAccessKey: config.aws.secretAccessKey
   },
   // Disable checksums to avoid CORS issues
-  requestChecksumCalculation: 'WHEN_REQUIRED'
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  // Force virtual-hosted-style URLs for better CORS compatibility
+  forcePathStyle: false
 });
 
 export const S3_BUCKET = config.aws.s3Bucket;

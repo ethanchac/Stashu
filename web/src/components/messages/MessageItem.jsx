@@ -30,6 +30,86 @@ export default function MessageItem({ message, channelId }) {
     }
   };
 
+  const handleCopyImage = async (imageUrl) => {
+    try {
+      console.log('Starting image copy for URL:', imageUrl);
+
+      // Check if clipboard API is available
+      if (!navigator.clipboard || !navigator.clipboard.write) {
+        throw new Error('Clipboard API not available');
+      }
+
+      // Use backend proxy to avoid CORS issues
+      const proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+      console.log('Using proxy URL:', proxyUrl);
+
+      // Load image directly using img element with proxy URL
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        // Don't set crossOrigin since we're using same-origin proxy
+        image.onload = () => {
+          console.log('Image loaded successfully:', image.width, 'x', image.height);
+          resolve(image);
+        };
+        image.onerror = (e) => {
+          console.error('Image load error:', e);
+          reject(new Error('Failed to load image'));
+        };
+        image.src = proxyUrl;
+      });
+
+      // Draw to canvas and convert to PNG
+      console.log('Drawing image to canvas');
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // Convert to PNG blob
+      const clipboardBlob = await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            console.log('Converted to PNG blob:', blob.size, 'bytes');
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to convert canvas to blob'));
+          }
+        }, 'image/png');
+      });
+
+      // Copy to clipboard
+      console.log('Attempting to write to clipboard...');
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': clipboardBlob
+        })
+      ]);
+
+      console.log('Successfully copied image to clipboard!');
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy image:', error);
+
+      // If the error is due to document not being focused, just ignore it
+      // The user likely switched tabs or clicked outside the window
+      if (error.name === 'NotAllowedError' && error.message.includes('not focused')) {
+        console.log('Clipboard operation failed because document is not focused - this is normal if you switched tabs');
+        return;
+      }
+
+      // For other errors, try fallback to copying the URL
+      try {
+        await navigator.clipboard.writeText(imageUrl);
+        setShowCopied(true);
+        setTimeout(() => setShowCopied(false), 2000);
+      } catch (fallbackError) {
+        console.error('Failed to copy URL:', fallbackError);
+      }
+    }
+  };
+
   const handlePin = async () => {
     try {
       await api.patch(`/channels/${channelId}/messages/${message.id}/pin`);
@@ -70,7 +150,7 @@ export default function MessageItem({ message, channelId }) {
         return (
           <div className="mt-2">
             <img
-              src={message.fileRef}
+              src={message.fileUrl || message.fileRef}
               alt={message.content}
               className="max-w-md rounded-lg border border-discord-gray"
               loading="lazy"
@@ -110,7 +190,7 @@ export default function MessageItem({ message, channelId }) {
               )}
             </div>
             <a
-              href={message.fileRef}
+              href={message.fileUrl || message.fileRef}
               download
               onClick={(e) => e.stopPropagation()}
               className="text-discord-accent hover:underline text-sm"
@@ -166,7 +246,13 @@ export default function MessageItem({ message, channelId }) {
       )}
 
       <div
-        onClick={() => handleCopy(message.content)}
+        onClick={() => {
+          if (message.type === 'image' && (message.fileUrl || message.fileRef)) {
+            handleCopyImage(message.fileUrl || message.fileRef);
+          } else {
+            handleCopy(message.content);
+          }
+        }}
         onContextMenu={handleContextMenu}
         className={`
           group relative p-4 rounded-lg transition-colors border cursor-pointer
@@ -175,7 +261,7 @@ export default function MessageItem({ message, channelId }) {
             : 'bg-discord-dark border-discord-gray hover:border-discord-lightgray hover:bg-discord-dark/80'}
           ${deleting ? 'opacity-50' : ''}
         `}
-        title="Click to copy message | Right-click for options"
+        title={message.type === 'image' ? 'Click to copy image | Right-click for options' : 'Click to copy message | Right-click for options'}
       >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">

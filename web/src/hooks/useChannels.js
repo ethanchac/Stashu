@@ -20,7 +20,7 @@ export const useChannels = () => {
 
     // Create Firestore query
     const channelsRef = collection(db, 'users', user.uid, 'channels');
-    const q = query(channelsRef, orderBy('createdAt', 'desc'));
+    const q = query(channelsRef, orderBy('order', 'asc'));
 
     // Subscribe to realtime updates
     const unsubscribe = onSnapshot(

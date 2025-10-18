@@ -64,19 +64,27 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:19006
 
 1. Create an S3 bucket in AWS Console
 2. Create IAM user with S3 permissions
-3. Configure CORS on the bucket:
+3. Configure CORS on the bucket (required for browser uploads):
 
 ```json
 [
   {
-    "AllowedOrigins": ["http://localhost:3000", "https://your-domain.com"],
-    "AllowedMethods": ["GET", "PUT", "POST"],
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "https://your-domain.com"
+    ],
+    "AllowedMethods": ["GET", "PUT", "POST", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3000
   }
 ]
 ```
+
+**Important**: The backend disables AWS SDK checksums to prevent CORS issues during browser uploads. This is configured in `src/config/aws.js` and `src/services/s3.service.js`.
 
 4. Add credentials to `.env`
 

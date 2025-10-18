@@ -1,6 +1,18 @@
-import { generatePresignedUploadUrl, generatePresignedDownloadUrl } from '../services/s3.service.js';
+import { generatePresignedUploadUrl, generatePresignedDownloadUrl, uploadFileToS3 } from '../services/s3.service.js';
 import { uploadRequestSchema, ALLOWED_FILE_TYPES_MAP } from '../models/message.model.js';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
+
+export const uploadMiddleware = upload.single('file');
 
 export const generateUploadUrl = async (req, res, next) => {
   try {
@@ -22,6 +34,44 @@ export const generateUploadUrl = async (req, res, next) => {
       uploadUrl: presignedUrl,
       s3Key,
       expiresIn: 900 // 15 minutes
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const uploadFileDirect = async (req, res, next) => {
+  try {
+    const uid = req.user.uid;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    // Generate unique S3 key
+    const fileExtension = ALLOWED_FILE_TYPES_MAP[file.mimetype];
+    if (!fileExtension) {
+      return res.status(400).json({ error: 'Invalid file type' });
+    }
+
+    const uniqueId = uuidv4();
+    const s3Key = `users/${uid}/uploads/${uniqueId}${fileExtension}`;
+
+    // Upload file directly to S3 from backend
+    await uploadFileToS3(s3Key, file.buffer, file.mimetype);
+
+    // Generate download URL
+    const downloadUrl = await generatePresignedDownloadUrl(s3Key);
+
+    res.json({
+      s3Key,
+      fileMetadata: {
+        fileName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype
+      },
+      downloadUrl
     });
   } catch (error) {
     next(error);

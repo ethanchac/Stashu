@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, Alert, Linking, StyleSheet, Modal, Share } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Linking, StyleSheet, Modal, Image, ActionSheetIOS, Platform } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import api from '../services/api';
 
 export default function MessageItem({ message, channelId, showChannelName = false }) {
@@ -42,14 +46,83 @@ export default function MessageItem({ message, channelId, showChannelName = fals
 
   const handleCopy = async () => {
     try {
-      // Use Share API as workaround for clipboard in Expo
-      await Share.share({
-        message: message.content
+      await Clipboard.setStringAsync(message.content);
+      Alert.alert('Copied', 'Message copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      Alert.alert('Error', 'Failed to copy to clipboard');
+    }
+  };
+
+  const handleCopyImage = async (imageUrl) => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Save to Photos', 'Share', 'Copy URL'],
+          cancelButtonIndex: 0,
+        },
+        async (buttonIndex) => {
+          if (buttonIndex === 1) {
+            // Save to Photos
+            await handleSaveToPhotos(imageUrl);
+          } else if (buttonIndex === 2) {
+            // Share
+            await handleShareImage(imageUrl);
+          } else if (buttonIndex === 3) {
+            // Copy URL
+            await Clipboard.setStringAsync(imageUrl);
+            Alert.alert('Copied', 'Image URL copied to clipboard');
+          }
+        }
+      );
+    } else {
+      // Android - just share
+      await handleShareImage(imageUrl);
+    }
+  };
+
+  const handleSaveToPhotos = async (imageUrl) => {
+    try {
+      // Request permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Need permission to save to Photos');
+        return;
+      }
+
+      // Download the image to cache
+      const fileUri = FileSystem.cacheDirectory + 'temp_image.jpg';
+      const { uri } = await FileSystem.downloadAsync(imageUrl, fileUri);
+
+      // Save to media library
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Success', 'Image saved to Photos');
+    } catch (error) {
+      console.error('Failed to save image:', error);
+      Alert.alert('Error', 'Failed to save image');
+    }
+  };
+
+  const handleShareImage = async (imageUrl) => {
+    try {
+      // Download the image to cache
+      const fileUri = FileSystem.cacheDirectory + 'temp_image.jpg';
+      const { uri } = await FileSystem.downloadAsync(imageUrl, fileUri);
+
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        throw new Error('Sharing is not available on this device');
+      }
+
+      // Use expo-sharing which properly handles images
+      await Sharing.shareAsync(uri, {
+        mimeType: 'image/jpeg',
+        dialogTitle: 'Share Image'
       });
     } catch (error) {
-      if (error.message !== 'User did not share') {
-        console.error('Failed to share:', error);
-      }
+      console.error('Failed to share image:', error);
+      Alert.alert('Error', 'Failed to share image');
     }
   };
 
@@ -67,6 +140,51 @@ export default function MessageItem({ message, channelId, showChannelName = fals
 
   const renderContent = () => {
     switch (message.type) {
+      case 'image':
+        return (
+          <View>
+            {message.fileUrl && (
+              <TouchableOpacity
+                onPress={() => handleCopyImage(message.fileUrl)}
+                onLongPress={() => Linking.openURL(message.fileUrl)}
+                activeOpacity={0.9}
+              >
+                <Image
+                  source={{ uri: message.fileUrl }}
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            )}
+            {message.content && !message.content.match(/\.(jpg|jpeg|png|gif|webp)$/i) && (
+              <Text style={styles.messageText} selectable>
+                {message.content}
+              </Text>
+            )}
+          </View>
+        );
+
+      case 'file':
+        return (
+          <TouchableOpacity
+            onPress={() => message.fileUrl && Linking.openURL(message.fileUrl)}
+            activeOpacity={0.7}
+            style={styles.fileContainer}
+          >
+            <Text style={styles.fileIcon}>📄</Text>
+            <View style={styles.fileInfo}>
+              <Text style={styles.fileName} numberOfLines={2}>
+                {message.content}
+              </Text>
+              {message.fileMetadata && (
+                <Text style={styles.fileSize}>
+                  {formatFileSize(message.fileMetadata.fileSize)}
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        );
+
       case 'link':
         return (
           <TouchableOpacity
@@ -88,10 +206,22 @@ export default function MessageItem({ message, channelId, showChannelName = fals
     }
   };
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   return (
     <>
       <TouchableOpacity
-        onPress={handleCopy}
+        onPress={() => {
+          // Don't copy on press for images - they handle their own clicks
+          if (message.type !== 'image') {
+            handleCopy();
+          }
+        }}
         onLongPress={() => setShowMenu(true)}
         activeOpacity={0.7}
         style={[
@@ -219,6 +349,38 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#dbdee1',
     lineHeight: 20,
+  },
+  messageImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginTop: 8,
+    backgroundColor: '#313338',
+  },
+  fileContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#313338',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  fileIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  fileInfo: {
+    flex: 1,
+  },
+  fileName: {
+    fontSize: 15,
+    color: '#dbdee1',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  fileSize: {
+    fontSize: 12,
+    color: '#949ba4',
   },
   linkText: {
     fontSize: 15,

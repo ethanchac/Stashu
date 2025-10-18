@@ -9,10 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert
+  Alert,
+  ActionSheetIOS,
+  Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMessages } from '../hooks/useMessages';
+import { useFileUpload } from '../hooks/useFileUpload';
+import MessageItem from '../components/MessageItem';
 import api from '../services/api';
 
 export default function ChatScreen({ route, navigation }) {
@@ -20,9 +24,17 @@ export default function ChatScreen({ route, navigation }) {
   const { messages, loading: messagesLoading, loadMore, hasMore } = useMessages(channelId);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null); // { uri, name, mimeType, type: 'image' | 'file' }
+  const { uploadFile, pickImage, pickDocument, uploading, progress } = useFileUpload();
   const flatListRef = useRef(null);
 
   const handleSendMessage = async () => {
+    // If there's a selected file, send it
+    if (selectedFile) {
+      await handleSendFile();
+      return;
+    }
+
     if (!newMessage.trim() || !channelId) return;
 
     const content = newMessage.trim();
@@ -41,6 +53,118 @@ export default function ChatScreen({ route, navigation }) {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleSendFile = async () => {
+    if (!selectedFile) return;
+
+    try {
+      setSending(true);
+
+      // Upload file to S3
+      const { s3Key, fileMetadata, downloadUrl } = await uploadFile(
+        selectedFile.uri,
+        selectedFile.name,
+        selectedFile.mimeType
+      );
+
+      // Send message with file reference and download URL
+      await api.post(`/channels/${channelId}/messages`, {
+        content: newMessage.trim() || selectedFile.name,
+        type: selectedFile.type,
+        fileRef: s3Key,
+        fileUrl: downloadUrl,
+        fileMetadata
+      });
+
+      // Clear selection and message
+      setSelectedFile(null);
+      setNewMessage('');
+    } catch (error) {
+      console.error('Failed to upload file:', error);
+      Alert.alert('Error', 'Failed to upload file');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleFileUpload = async () => {
+    const options = ['Take Photo', 'Choose from Library', 'Choose Document', 'Cancel'];
+    const cancelButtonIndex = 3;
+
+    const showActionSheet = () => {
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options,
+            cancelButtonIndex,
+          },
+          async (buttonIndex) => {
+            if (buttonIndex === 0) {
+              // Take Photo (not implemented in this version)
+              Alert.alert('Info', 'Camera feature coming soon!');
+            } else if (buttonIndex === 1) {
+              await handleImagePick();
+            } else if (buttonIndex === 2) {
+              await handleDocumentPick();
+            }
+          }
+        );
+      } else {
+        // Android - show simple alert
+        Alert.alert(
+          'Upload File',
+          'Choose an option',
+          [
+            { text: 'Choose Image', onPress: handleImagePick },
+            { text: 'Choose Document', onPress: handleDocumentPick },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      }
+    };
+
+    showActionSheet();
+  };
+
+  const handleImagePick = async () => {
+    try {
+      const result = await pickImage();
+      if (!result) return;
+
+      // Stage the image for preview
+      setSelectedFile({
+        uri: result.uri,
+        name: `image-${Date.now()}.${result.uri.split('.').pop()}`,
+        mimeType: result.mimeType || 'image/jpeg',
+        type: 'image'
+      });
+    } catch (error) {
+      console.error('Failed to pick image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  const handleDocumentPick = async () => {
+    try {
+      const result = await pickDocument();
+      if (!result) return;
+
+      // Stage the document for preview
+      setSelectedFile({
+        uri: result.uri,
+        name: result.name,
+        mimeType: result.mimeType || 'application/octet-stream',
+        type: 'file'
+      });
+    } catch (error) {
+      console.error('Failed to pick document:', error);
+      Alert.alert('Error', 'Failed to pick document');
+    }
+  };
+
+  const handleCancelFile = () => {
+    setSelectedFile(null);
   };
 
   return (
@@ -74,15 +198,14 @@ export default function ChatScreen({ route, navigation }) {
             data={messages}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <View style={styles.messageItem}>
-                <Text style={styles.messageDate}>
-                  {new Date(item.createdAt).toLocaleString()}
-                </Text>
-                <Text style={styles.messageContent}>{item.content}</Text>
-              </View>
+              <MessageItem
+                message={item}
+                channelId={channelId}
+              />
             )}
             onEndReached={() => hasMore && loadMore()}
             onEndReachedThreshold={0.5}
+            contentContainerStyle={styles.messagesList}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
             onLayout={() => flatListRef.current?.scrollToEnd()}
           />
@@ -95,26 +218,93 @@ export default function ChatScreen({ route, navigation }) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Type a message..."
-              placeholderTextColor="#72767d"
-              value={newMessage}
-              onChangeText={setNewMessage}
-              multiline
-              maxLength={2000}
-              editable={!sending}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, sending && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={sending || !newMessage.trim()}
-            >
-              <Text style={styles.sendButtonText}>
-                {sending ? '...' : '→'}
-              </Text>
-            </TouchableOpacity>
+          {/* Upload Progress */}
+          {uploading && (
+            <View style={styles.uploadProgressContainer}>
+              <View style={styles.uploadProgressInfo}>
+                <Text style={styles.uploadProgressText}>Uploading...</Text>
+                <Text style={styles.uploadProgressPercent}>{progress}%</Text>
+              </View>
+              <View style={styles.uploadProgressBar}>
+                <View
+                  style={[
+                    styles.uploadProgressFill,
+                    { width: `${progress}%` }
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          <View>
+            {/* File Preview Section */}
+            {selectedFile && (
+              <View style={styles.filePreviewContainer}>
+                {selectedFile.type === 'image' ? (
+                  <View style={styles.previewCard}>
+                    <Image
+                      source={{ uri: selectedFile.uri }}
+                      style={styles.previewImage}
+                      resizeMode="cover"
+                    />
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={handleCancelFile}
+                      disabled={uploading}
+                    >
+                      <Text style={styles.cancelButtonText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.previewCard}>
+                    <View style={styles.previewFile}>
+                      <Text style={styles.previewFileIcon}>📄</Text>
+                      <Text style={styles.previewFileName} numberOfLines={2}>
+                        {selectedFile.name}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={handleCancelFile}
+                      disabled={uploading}
+                    >
+                      <Text style={styles.cancelButtonText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            <View style={styles.inputContainer}>
+              {/* Attachment Button */}
+              <TouchableOpacity
+                style={[styles.attachButton, (uploading || sending) && styles.attachButtonDisabled]}
+                onPress={handleFileUpload}
+                disabled={uploading || sending}
+              >
+                <Text style={styles.attachButtonText}>+</Text>
+              </TouchableOpacity>
+
+              <TextInput
+                style={styles.messageInput}
+                placeholder={selectedFile ? 'Add a caption...' : 'Type a message..'}
+                placeholderTextColor="#72767d"
+                value={newMessage}
+                onChangeText={setNewMessage}
+                multiline
+                maxLength={2000}
+                editable={!sending && !uploading}
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, (sending || (!newMessage.trim() && !selectedFile)) && styles.sendButtonDisabled]}
+                onPress={handleSendMessage}
+                disabled={sending || (!newMessage.trim() && !selectedFile)}
+              >
+                <Text style={styles.sendButtonText}>
+                  {sending ? '...' : '→'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </KeyboardAvoidingView>
       )}
@@ -155,19 +345,86 @@ const styles = StyleSheet.create({
   messagesContainer: {
     flex: 1,
   },
-  messageItem: {
+  messagesList: {
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#3f4147',
   },
-  messageDate: {
+  uploadProgressContainer: {
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#2b2d31',
+    borderTopWidth: 1,
+    borderTopColor: '#3f4147',
+  },
+  uploadProgressInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  uploadProgressText: {
     fontSize: 12,
     color: '#b5bac1',
-    marginBottom: 4,
   },
-  messageContent: {
-    fontSize: 16,
+  uploadProgressPercent: {
+    fontSize: 12,
+    color: '#b5bac1',
+  },
+  uploadProgressBar: {
+    height: 4,
+    backgroundColor: '#1e1f22',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  uploadProgressFill: {
+    height: '100%',
+    backgroundColor: '#5865f2',
+  },
+  filePreviewContainer: {
+    padding: 16,
+    paddingBottom: 8,
+    backgroundColor: '#2b2d31',
+    borderTopWidth: 1,
+    borderTopColor: '#3f4147',
+  },
+  previewCard: {
+    backgroundColor: '#1e1f22',
+    borderRadius: 8,
+    padding: 8,
+    position: 'relative',
+  },
+  previewImage: {
+    width: '100%',
+    height: 120,
+    borderRadius: 8,
+  },
+  previewFile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+  },
+  previewFileIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  previewFileName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#dbdee1',
+  },
+  cancelButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -175,6 +432,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#2b2d31',
     borderTopWidth: 1,
     borderTopColor: '#3f4147',
+  },
+  attachButton: {
+    marginRight: 8,
+    width: 44,
+    height: 44,
+    backgroundColor: '#5865f2',
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+  },
+  attachButtonDisabled: {
+    opacity: 0.5,
+  },
+  attachButtonText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#ffffff',
   },
   messageInput: {
     flex: 1,
