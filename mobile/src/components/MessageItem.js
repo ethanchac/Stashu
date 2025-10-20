@@ -76,8 +76,30 @@ export default function MessageItem({ message, channelId, showChannelName = fals
         }
       );
     } else {
-      // Android - just share
-      await handleShareImage(imageUrl);
+      // Android - show alert dialog with options
+      Alert.alert(
+        'Image Options',
+        'What would you like to do with this image?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Save to Photos',
+            onPress: () => handleSaveToPhotos(imageUrl)
+          },
+          {
+            text: 'Share',
+            onPress: () => handleShareImage(imageUrl)
+          },
+          {
+            text: 'Copy URL',
+            onPress: async () => {
+              await Clipboard.setStringAsync(imageUrl);
+              Alert.alert('Copied', 'Image URL copied to clipboard');
+            }
+          }
+        ],
+        { cancelable: true }
+      );
     }
   };
 

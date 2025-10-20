@@ -110,6 +110,47 @@ export default function MessageItem({ message, channelId }) {
     }
   };
 
+  const handleSaveImage = async (imageUrl) => {
+    try {
+      console.log('Starting image download for URL:', imageUrl);
+
+      // Use backend proxy to avoid CORS issues
+      const proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+
+      // Fetch the image
+      const response = await fetch(proxyUrl);
+      if (!response.ok) {
+        throw new Error('Failed to fetch image');
+      }
+
+      const blob = await response.blob();
+
+      // Extract filename from URL or use default
+      const urlPath = new URL(imageUrl).pathname;
+      const filename = urlPath.split('/').pop() || 'image.png';
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      console.log('Successfully saved image!');
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to save image:', error);
+      alert('Failed to save image. Please try again.');
+    }
+  };
+
   const handlePin = async () => {
     try {
       await api.patch(`/channels/${channelId}/messages/${message.id}/pin`);
@@ -376,7 +417,11 @@ export default function MessageItem({ message, channelId }) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleCopy(message.content);
+                if (message.type === 'image' && (message.fileUrl || message.fileRef)) {
+                  handleCopyImage(message.fileUrl || message.fileRef);
+                } else {
+                  handleCopy(message.content);
+                }
                 setShowContextMenu(false);
               }}
               className="w-full px-4 py-2 text-left text-discord-text hover:bg-discord-accent hover:text-white transition-colors flex items-center gap-2"
@@ -384,8 +429,23 @@ export default function MessageItem({ message, channelId }) {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
-              Copy Message
+              {message.type === 'image' ? 'Copy Image' : 'Copy Message'}
             </button>
+            {message.type === 'image' && (message.fileUrl || message.fileRef) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSaveImage(message.fileUrl || message.fileRef);
+                  setShowContextMenu(false);
+                }}
+                className="w-full px-4 py-2 text-left text-discord-text hover:bg-discord-accent hover:text-white transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Save Image
+              </button>
+            )}
             <hr className="my-1 border-discord-gray" />
             <button
               onClick={(e) => {
