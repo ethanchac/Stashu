@@ -43,46 +43,51 @@ export default function MessageItem({ message, channelId }) {
       const proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
       console.log('Using proxy URL:', proxyUrl);
 
-      // Load image directly using img element with proxy URL
-      const img = await new Promise((resolve, reject) => {
-        const image = new Image();
-        // Don't set crossOrigin since we're using same-origin proxy
-        image.onload = () => {
-          console.log('Image loaded successfully:', image.width, 'x', image.height);
-          resolve(image);
-        };
-        image.onerror = (e) => {
-          console.error('Image load error:', e);
-          reject(new Error('Failed to load image'));
-        };
-        image.src = proxyUrl;
+      // Safari-compatible approach: Create ClipboardItem with Promise synchronously
+      // This keeps the operation within the user gesture context
+      const clipboardItemPromise = new Promise(async (resolve, reject) => {
+        try {
+          // Load image
+          const img = await new Promise((imgResolve, imgReject) => {
+            const image = new Image();
+            image.onload = () => {
+              console.log('Image loaded successfully:', image.width, 'x', image.height);
+              imgResolve(image);
+            };
+            image.onerror = (e) => {
+              console.error('Image load error:', e);
+              imgReject(new Error('Failed to load image'));
+            };
+            image.src = proxyUrl;
+          });
+
+          // Draw to canvas and convert to PNG
+          console.log('Drawing image to canvas');
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+
+          // Convert to PNG blob
+          canvas.toBlob((blob) => {
+            if (blob) {
+              console.log('Converted to PNG blob:', blob.size, 'bytes');
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to convert canvas to blob'));
+            }
+          }, 'image/png');
+        } catch (error) {
+          reject(error);
+        }
       });
 
-      // Draw to canvas and convert to PNG
-      console.log('Drawing image to canvas');
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-
-      // Convert to PNG blob
-      const clipboardBlob = await new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (blob) {
-            console.log('Converted to PNG blob:', blob.size, 'bytes');
-            resolve(blob);
-          } else {
-            reject(new Error('Failed to convert canvas to blob'));
-          }
-        }, 'image/png');
-      });
-
-      // Copy to clipboard
+      // Copy to clipboard with Promise-based ClipboardItem (Safari-compatible)
       console.log('Attempting to write to clipboard...');
       await navigator.clipboard.write([
         new ClipboardItem({
-          'image/png': clipboardBlob
+          'image/png': clipboardItemPromise
         })
       ]);
 

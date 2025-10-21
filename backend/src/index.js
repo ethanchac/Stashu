@@ -15,7 +15,10 @@ const app = express();
 // CORS configuration
 app.use(cors({
   origin: config.cors.origins,
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Type']
 }));
 
 // Body parser

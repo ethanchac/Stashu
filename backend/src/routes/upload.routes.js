@@ -5,6 +5,17 @@ import { uploadLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
+// Handle OPTIONS preflight for CORS (must come before auth middleware)
+router.options('/upload-url', (req, res) => {
+  res.sendStatus(204);
+});
+router.options('/upload', (req, res) => {
+  res.sendStatus(204);
+});
+router.options('/download-url', (req, res) => {
+  res.sendStatus(204);
+});
+
 router.use(verifyFirebaseToken);
 router.use(uploadLimiter);
 
